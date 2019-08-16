@@ -7,8 +7,10 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Properties;
@@ -45,18 +47,22 @@ import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import util.geode.health.domain.GatewaySender;
+import util.geode.health.domain.GatewaySender.GatewayType;
 import util.geode.health.domain.Health;
 import util.geode.health.domain.Member;
 import util.geode.monitor.Constants;
 import util.geode.monitor.Util;
 import util.geode.monitor.impl.MonitorImpl;
+import util.geode.monitor.log.LogHeader;
 import util.geode.monitor.log.LogMessage;
-import util.geode.monitor.xml.MxBeans;
 
 public class HealthCheck {
 	private static final String ALERT_URL = "alert-url";
 	private static final String ALERT_URL_PARMS = "alert-url-parms";
 	private static final String ALERT_CLUSTER_FQDN = "alert-cluster-fqdn";
+	private static final String HEALTH_PROPS = "health.properties";
+	private static final String ALERT_PROPS = "alert.properties";
 
 	private Util util = new Util();
 
@@ -67,12 +73,9 @@ public class HealthCheck {
 	private int nextHostIndex = 1;
 	private int jmxPort = 1099;
 	private JMXServiceURL url = null;
-	private MxBeans mxBeans;
 	private JMXConnector jmxConnection;
 	private MBeanServerConnection mbs;
 	private ObjectName systemName;
-	private int reconnectRetryAttempts = 5;
-	private int reconnectRetryCount = 0;
 	private Logger LOG = LoggerFactory.getLogger(HealthCheck.class);
 	private AtomicBoolean jmxConnectionActive = new AtomicBoolean(false);
 	private Properties alertProps;
@@ -85,7 +88,7 @@ public class HealthCheck {
 	};
 
 	public void start() throws Exception {
-		loadMonitorProps();
+		loadHealthProps();
 		getSendAlertPropertyFile();
 		if (connect()) {
 			doHealthCheck();
@@ -115,29 +118,146 @@ public class HealthCheck {
 			getJVMGCTime(member, "gcTimeMillis", jsonObj, "maximumGCTimeMillis");
 		}
 
-		if (!checkMemberCount(health.getGatewaySenderCnt(), jsonObj, "gatewaySenderCount")) {
-		}
-
-		if (!checkMemberCount(health.getGatewayReceiverCnt(), jsonObj, "gatewayReceiverCount")) {
-		}
-
 		double usagePercent = jsonObj.getDouble("maximumHeapUsagePercent");
 		if (health.getUsedHeap() > (health.getTotalHeap() * usagePercent)) {
-			System.out.println("send maximum heap alert");
+			buildSpecialLogMessage(
+					"Cluster's maximum heap for all cache servers exceeded. Total used heap=" + health.getUsedHeap(),
+					"MAJOR", jsonObj.getString("clusterName"));
 		}
+
+		ObjectName[] objects = util.getObjectNames(mbs, systemName, Constants.ObjectNameType.GATEWAY_SENDERS);
+		if (objects == null || objects.length == 0)
+			return;
+
+		health.setGateway(true);
+		List<String> gatewaySenders = new ArrayList<String>();
+		for (ObjectName name : objects) {
+			String prop = name.getKeyProperty("gatewaySender");
+			if (!gatewaySenders.contains(prop))
+				gatewaySenders.add(name.getKeyProperty("gatewaySender"));
+		}
+
+		for (String sender : gatewaySenders) {
+			List<ObjectName> objectsByName = getGatewayObjectsByName(objects, sender);
+			for (ObjectName object : objectsByName) {
+				AttributeList attrs = util.getAttributes(mbs, object, new String[] { "EventQueueSize", "Connected" });
+				if (attrs == null || attrs.size() == 0)
+					break;
+				Attribute attr = (Attribute) attrs.get(0);
+				int eventQueueSize = (int) attr.getValue();
+				attr = (Attribute) attrs.get(1);
+				boolean connected = (boolean) attr.getValue();
+				if (checkForParallelGateway(object)) {
+					health.addGatewaySender(
+							new GatewaySender(object.getKeyProperty("gatewaySender"), object.getKeyProperty("member"),
+									object, GatewayType.PARALLEL, false, eventQueueSize, connected));
+				} else {
+					if (getPrimarySerialGateway(object)) {
+						health.addGatewaySender(new GatewaySender(object.getKeyProperty("gatewaySender"),
+								object.getKeyProperty("member"), object, GatewayType.SERIAL, true, eventQueueSize,
+								connected));
+					} else {
+						health.addGatewaySender(new GatewaySender(object.getKeyProperty("gatewaySender"),
+								object.getKeyProperty("member"), object, GatewayType.SERIAL, false, eventQueueSize,
+								connected));
+					}
+				}
+			}
+		}
+
+		for (GatewaySender gatewaySender : health.getGatewaySenders()) {
+			if (gatewaySender.getType().equals(GatewayType.PARALLEL)) {
+				if (!gatewaySender.isConnected()) {
+					buildSpecialLogMessage("Sender not connected to remote system", "MAJOR", gatewaySender.getMember());
+				} else if (gatewaySender.getEventQueueSize() > jsonObj.getInt("gatewayMaximumQueueSize")) {
+					buildSpecialLogMessage(
+							"Queue size greater than limit of " + jsonObj.getInt("gatewayMaximumQueueSize"), "MAJOR",
+							gatewaySender.getMember());
+				}
+			} else {
+				if (gatewaySender.isPrimary()) {
+					if (!gatewaySender.isConnected()) {
+						buildSpecialLogMessage("Sender not connected to remote system", "MAJOR",
+								gatewaySender.getMember());
+					} else if (gatewaySender.getEventQueueSize() > jsonObj.getInt("gatewayMaximumQueueSize")) {
+						buildSpecialLogMessage(
+								"Queue size greater than limit of " + jsonObj.getInt("gatewayMaximumQueueSize"),
+								"MAJOR", gatewaySender.getMember());
+					}
+				}
+			}
+		}
+	}
+
+	private void buildSpecialLogMessage(String message, String level, String member) {
+		long timeStamp = new Date().getTime();
+		SimpleDateFormat df = new SimpleDateFormat(Constants.DATE_FORMAT);
+		SimpleDateFormat tf = new SimpleDateFormat(Constants.TIME_FORMAT);
+		SimpleDateFormat zf = new SimpleDateFormat(Constants.ZONE_FORMAT);
+
+		LogHeader header = new LogHeader(level, df.format(timeStamp), tf.format(timeStamp), zf.format(timeStamp),
+				member, null, null);
+
+		LogMessage logMessage = new LogMessage(header, message);
+		logMessage.setEvent(null);
+		sendAlert(logMessage);
+	}
+
+	private List<ObjectName> getGatewayObjectsByName(ObjectName[] objects, String name) {
+		List<ObjectName> objectsByName = new ArrayList<ObjectName>();
+		if (objects != null && objects.length > 0) {
+			for (ObjectName object : objects) {
+				if (object.getKeyProperty("gatewaySender").equals(name)) {
+					objectsByName.add(object);
+				}
+			}
+		}
+		return objectsByName;
+	}
+
+	private boolean checkForParallelGateway(ObjectName name) throws Exception {
+		if (name == null) {
+			return false;
+		}
+		AttributeList attrs = util.getAttributes(mbs, name, new String[] { "Parallel" });
+		if (attrs != null && attrs.size() == 1) {
+			Attribute attr = (Attribute) attrs.get(0);
+			if ("Parallel".equalsIgnoreCase(attr.getName())) {
+				return (boolean) attr.getValue();
+			}
+		}
+		return false;
+	}
+
+	private boolean getPrimarySerialGateway(ObjectName name) throws Exception {
+		if (name == null) {
+			return false;
+		}
+
+		boolean primary = false;
+		AttributeList attrs = util.getAttributes(mbs, name, new String[] { "Primary" });
+		if (attrs != null && attrs.size() == 1) {
+			Attribute attr = (Attribute) attrs.get(0);
+			if ("Primary".equalsIgnoreCase(attr.getName())) {
+				primary = (boolean) attr.getValue();
+				if (primary)
+					return primary;
+			}
+		}
+		return false;
 	}
 
 	private void sendMissingMemberAlert(List<Member> members) {
 		for (Member member : members) {
 			if (member.isMissing()) {
-				System.out.println(member + " send missing alert");
+				buildSpecialLogMessage("Member " + member.getName() + " is down", "MAJOR", member.getName());
 			}
 		}
 	}
 
 	private void sendUnresponsiveMemberAlert(List<Member> members) {
 		for (Member member : members) {
-			System.out.println(member + " send unresponsive alert");
+			buildSpecialLogMessage("Member " + member.getName() + " is unresponsive", "MAJOR", member.getName());
 		}
 	}
 
@@ -201,7 +321,9 @@ public class HealthCheck {
 			currentGCTimeMillis = (long) cds.get(name);
 			maximumGCTimeMillis = jObj.getLong(jsonName);
 			if (currentGCTimeMillis > maximumGCTimeMillis) {
-				System.out.println("send GC Time alert");
+				buildSpecialLogMessage(
+						"Member " + member.getName() + " current GC time exceeds limit of " + maximumGCTimeMillis,
+						"MAJOR", member.getName());
 			}
 		}
 	}
@@ -216,9 +338,8 @@ public class HealthCheck {
 		health.setTotalHeap(Double.valueOf(String.valueOf(((Attribute) al.get(0)).getValue())));
 		health.setUsedHeap(Double.valueOf(String.valueOf(((Attribute) al.get(1)).getValue())));
 		String[] senders = getNames(Constants.ListType.SENDERS);
-		String[] receivers = getNames(Constants.ListType.RECEIVERS);
-		health.setGatewaySenderCnt(senders.length);
-		health.setGatewayReceiverCnt(receivers.length);
+		if (senders.length > 0)
+			health.setGateway(true);
 		health.setLocators(getNames(Constants.ListType.LOCATORS));
 		health.setServers(getNames(Constants.ListType.SERVERS));
 		health.setRegions(getNames(Constants.ListType.REGION_PATHS));
@@ -249,7 +370,6 @@ public class HealthCheck {
 				jmxConnection = JMXConnectorFactory.connect(url);
 				systemName = new ObjectName(Constants.DISTRIBUTED_SYSTEM_OBJECT_NAME);
 				mbs = jmxConnection.getMBeanServerConnection();
-				reconnectRetryCount = 0;
 				break;
 			} catch (IOException e) {
 				LOG.error("Connect: JMX Manager not running for URL: " + url + " " + e.getMessage());
@@ -276,15 +396,15 @@ public class HealthCheck {
 		jmxConnectionActive.set(false);
 	}
 
-	private void loadMonitorProps() {
+	private void loadHealthProps() {
 		int value = 0;
 		String[] split;
-		Properties monitorProps = new Properties();
+		Properties healthProps = new Properties();
 
 		try {
-			monitorProps.load(MonitorImpl.class.getClassLoader().getResourceAsStream(Constants.HM_PROPS));
+			healthProps.load(MonitorImpl.class.getClassLoader().getResourceAsStream(HEALTH_PROPS));
 
-			jmxHost = monitorProps.getProperty(Constants.P_MANAGERS);
+			jmxHost = healthProps.getProperty(Constants.P_MANAGERS);
 			if ((jmxHost == null) || (jmxHost.length() == 0)) {
 				throw new RuntimeException(Constants.E_HOST);
 			}
@@ -308,7 +428,7 @@ public class HealthCheck {
 				jmxHosts.add(jmxHost);
 			}
 
-			value = Integer.parseInt(monitorProps.getProperty(Constants.P_PORT));
+			value = Integer.parseInt(healthProps.getProperty(Constants.P_PORT));
 			if (value == 0) {
 				throw new RuntimeException(Constants.E_PORT);
 			} else {
@@ -323,7 +443,7 @@ public class HealthCheck {
 	private boolean getSendAlertPropertyFile() {
 		boolean alertLoaded = false;
 		try {
-			InputStream input = HealthCheck.class.getClassLoader().getResourceAsStream("alert.properties");
+			InputStream input = HealthCheck.class.getClassLoader().getResourceAsStream(ALERT_PROPS);
 			alertProps = new Properties();
 			try {
 				alertProps.load(input);

@@ -1,33 +1,37 @@
 package util.geode.health.domain;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 public class Health {
 	private int serverCnt;
 	private int locatorCnt;
-	private int gatewayReceiverCnt; 
-	private int gatewaySenderCnt;
+	private int gatewayQueueSize;
 	private double totalHeap;
 	private double usedHeap;
 	private double gcTimeMillis;
 	private String[] locators;
 	private String[] servers;
 	private String[] regions;
+	private boolean gateway = false;
+	private List<GatewaySender> gatewaySenders;
 
-	public Health() {}
+	public Health() {
+	}
 
-	public Health(int serverCnt, int locatorCnt, int gatewayReceiverCnt, int gatewaySenderCnt, double totalHeap,
-			double usedHeap, double gcTimeMillis, String[] locators, String[] servers, String[] regions) {
+	public Health(int serverCnt, int locatorCnt, int gatewayQueueSize, double totalHeap, double usedHeap,
+			double gcTimeMillis, String[] locators, String[] servers, String[] regions, boolean gateway) {
 		this.serverCnt = serverCnt;
 		this.locatorCnt = locatorCnt;
-		this.gatewayReceiverCnt = gatewayReceiverCnt;
-		this.gatewaySenderCnt = gatewaySenderCnt;
+		this.gatewayQueueSize = gatewayQueueSize;
 		this.totalHeap = totalHeap;
 		this.usedHeap = usedHeap;
 		this.gcTimeMillis = gcTimeMillis;
 		this.locators = locators;
 		this.servers = servers;
 		this.regions = regions;
+		this.gateway = gateway;
 	}
 
 	public int getServerCnt() {
@@ -46,20 +50,12 @@ public class Health {
 		this.locatorCnt = locatorCnt;
 	}
 
-	public int getGatewayReceiverCnt() {
-		return gatewayReceiverCnt;
+	public int getGatewayQueueSize() {
+		return gatewayQueueSize;
 	}
 
-	public void setGatewayReceiverCnt(int gatewayReceiverCnt) {
-		this.gatewayReceiverCnt = gatewayReceiverCnt;
-	}
-
-	public int getGatewaySenderCnt() {
-		return gatewaySenderCnt;
-	}
-
-	public void setGatewaySenderCnt(int gatewaySenderCnt) {
-		this.gatewaySenderCnt = gatewaySenderCnt;
+	public void setGatewayQueueSize(int gatewayQueueSize) {
+		this.gatewayQueueSize = gatewayQueueSize;
 	}
 
 	public double getTotalHeap() {
@@ -76,6 +72,14 @@ public class Health {
 
 	public void setUsedHeap(double usedHeap) {
 		this.usedHeap = usedHeap;
+	}
+
+	public double getGcTimeMillis() {
+		return gcTimeMillis;
+	}
+
+	public void setGcTimeMillis(double gcTimeMillis) {
+		this.gcTimeMillis = gcTimeMillis;
 	}
 
 	public String[] getLocators() {
@@ -102,20 +106,37 @@ public class Health {
 		this.regions = regions;
 	}
 
-	public double getGcTimeMillis() {
-		return gcTimeMillis;
+	public boolean isGateway() {
+		return gateway;
 	}
 
-	public void setGcTimeMillis(double gcTimeMillis) {
-		this.gcTimeMillis = gcTimeMillis;
+	public void setGateway(boolean gateway) {
+		this.gateway = gateway;
+	}
+
+	public List<GatewaySender> getGatewaySenders() {
+		if (gatewaySenders == null)
+			gatewaySenders = new ArrayList<GatewaySender>();
+		return gatewaySenders;
+	}
+
+	public void setGatewaySenders(List<GatewaySender> gatewaySenders) {
+		this.gatewaySenders = gatewaySenders;
+	}
+
+	public void addGatewaySender(GatewaySender gatewaySender) {
+		if (gatewaySenders == null)
+			gatewaySenders = new ArrayList<GatewaySender>();
+		this.gatewaySenders.add(gatewaySender);
 	}
 
 	@Override
 	public int hashCode() {
 		final int prime = 31;
 		int result = 1;
-		result = prime * result + gatewayReceiverCnt;
-		result = prime * result + gatewaySenderCnt;
+		result = prime * result + (gateway ? 1231 : 1237);
+		result = prime * result + gatewayQueueSize;
+		result = prime * result + ((gatewaySenders == null) ? 0 : gatewaySenders.hashCode());
 		long temp;
 		temp = Double.doubleToLongBits(gcTimeMillis);
 		result = prime * result + (int) (temp ^ (temp >>> 32));
@@ -140,9 +161,14 @@ public class Health {
 		if (getClass() != obj.getClass())
 			return false;
 		Health other = (Health) obj;
-		if (gatewayReceiverCnt != other.gatewayReceiverCnt)
+		if (gateway != other.gateway)
 			return false;
-		if (gatewaySenderCnt != other.gatewaySenderCnt)
+		if (gatewayQueueSize != other.gatewayQueueSize)
+			return false;
+		if (gatewaySenders == null) {
+			if (other.gatewaySenders != null)
+				return false;
+		} else if (!gatewaySenders.equals(other.gatewaySenders))
 			return false;
 		if (Double.doubleToLongBits(gcTimeMillis) != Double.doubleToLongBits(other.gcTimeMillis))
 			return false;
@@ -163,12 +189,4 @@ public class Health {
 		return true;
 	}
 
-	@Override
-	public String toString() {
-		return "Health [serverCnt=" + serverCnt + ", locatorCnt=" + locatorCnt + ", gatewayReceiverCnt="
-				+ gatewayReceiverCnt + ", gatewaySenderCnt=" + gatewaySenderCnt + ", totalHeap=" + totalHeap
-				+ ", usedHeap=" + usedHeap + ", gcTimeMillis=" + gcTimeMillis + ", locators="
-				+ Arrays.toString(locators) + ", servers=" + Arrays.toString(servers) + ", regions="
-				+ Arrays.toString(regions) + "]";
-	}
 }

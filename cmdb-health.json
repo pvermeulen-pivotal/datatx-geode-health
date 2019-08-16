@@ -4,8 +4,8 @@
 	"serverCount": 1,
 	"maximumHeapUsagePercent": 0.95,
 	"maximumGCTimeMillis": 1000,
-	"gatewaySenderCount": 0,
-	"gatewayReceiverCount": 0,
+	"gateway": "true",
+	"gatewayMaximumQueueSize": 500,
 	"locators": [
 		{
 			"name": "locator1",
