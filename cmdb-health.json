@@ -1,0 +1,24 @@
+{
+	"clusterName": "cluster-1",
+	"locatorCount": 1,
+	"serverCount": 1,
+	"maximumHeapUsagePercent": 0.95,
+	"maximumGCTimeMillis": 1000,
+	"gatewaySenderCount": 0,
+	"gatewayReceiverCount": 0,
+	"locators": [
+		{
+			"name": "locator1",
+			"host": "10.76.39.56",
+			"port": 10334
+		}
+	],
+	"servers": [
+		{
+			"name": "server1",
+			"host": "10.76.39.56",
+			"port": 40404
+		}
+	]
+}
+	
