@@ -66,7 +66,7 @@ public class HealthCheck {
 	private static final String ALERT_CLUSTER_FQDN = "alert-cluster-fqdn";
 	private static final String HEALTH_PROPS = "health.properties";
 	private static final String ALERT_PROPS = "alert.properties";
-	private static final String SERVER_COUNT= "serverCount";
+	private static final String SERVER_COUNT = "serverCount";
 	private static final String GC_TIME_MILLIS = "gcTimeMillis";
 	private static final String MAX_GC_TIME_MILLIS = "maximumGCTimeMillis";
 	private static final String MAX_HEAP_USAGE_PERCENT = "maximumHeapUsagePercent";
@@ -80,23 +80,26 @@ public class HealthCheck {
 	private static final String MINOR = "MINOR";
 	private static final String APPL_LOG = "applicationLog";
 	private static final String LOG4J_PROPS = "log4j.properties";
-	private static final String NAME= "name";
+	private static final String NAME = "name";
 	private static final String HOST = "host";
 	private static final String PORT = "port";
 	private static final String SHOW_JVM_METRICS = "showJVMMetrics";
-	private static final String MEMBER_COUNT ="MemberCount";
+	private static final String MEMBER_COUNT = "MemberCount";
 	private static final String LOCATOR_COUNT = "LocatorCount";
 	private static final String TOT_HEAP_SPACE = "TotalHeapSize";
 	private static final String USED_HEAP_SPACE = "UsedHeapSize";
 	private static final String TLS = "TLS";
 	private static final String SEVERITY = "severity";
 	private static final String FQDN = "fqdn";
-	private static final String MESSAGE="message";
+	private static final String MESSAGE = "message";
 	private static final String CMDB_HEALTH_JSON = "cmdb-health.json";
 	private static final String LOCATORS = "locators";
 	private static final String SERVERS = "servers";
 	private static final String PARALLEL = "Parallel";
 	private static final String PRIMARY = "Primary";
+	private static final String LOG_LEVEL = "log-level";
+	private static final String LOG_FILE = "log-file";
+	private static final String CONFIG = "CONFIG";
 
 	private Util util = new Util();
 
@@ -142,7 +145,7 @@ public class HealthCheck {
 			closeConnections();
 		}
 	}
-	
+
 	/**
 	 * Perform the health check using GemFire cluster and CMDB
 	 * 
@@ -154,8 +157,7 @@ public class HealthCheck {
 		// get CMDB health
 		JSONObject jsonObj = new JSONObject(getCmdbHealth());
 		// get all locators
-		List<Member> locators = getMembers(Arrays.asList(health.getLocators()), jsonObj, LOCATORS,
-				MemberType.LOCATOR);
+		List<Member> locators = getMembers(Arrays.asList(health.getLocators()), jsonObj, LOCATORS, MemberType.LOCATOR);
 		// check locator count to CMDB
 		if (!checkMemberCount(health.getLocatorCnt(), jsonObj, LOCATOR_COUNT)) {
 			// If missing locator(s) send alert
@@ -230,14 +232,14 @@ public class HealthCheck {
 					// if gateway sender is a serial gateway
 					if (getPrimarySerialGateway(object)) {
 						// get the primary serial gateway create sender and add to list
-						health.addGatewaySender(new GatewaySender(object.getKeyProperty(GATEWAY_SENDER),
-								object.getKeyProperty(MEMBER), object, GatewayType.SERIAL, true, eventQueueSize,
-								connected));
+						health.addGatewaySender(
+								new GatewaySender(object.getKeyProperty(GATEWAY_SENDER), object.getKeyProperty(MEMBER),
+										object, GatewayType.SERIAL, true, eventQueueSize, connected));
 					} else {
 						// add secondary gateway to list
-						health.addGatewaySender(new GatewaySender(object.getKeyProperty(GATEWAY_SENDER),
-								object.getKeyProperty(MEMBER), object, GatewayType.SERIAL, false, eventQueueSize,
-								connected));
+						health.addGatewaySender(
+								new GatewaySender(object.getKeyProperty(GATEWAY_SENDER), object.getKeyProperty(MEMBER),
+										object, GatewayType.SERIAL, false, eventQueueSize, connected));
 					}
 				}
 			}
@@ -275,10 +277,9 @@ public class HealthCheck {
 					} else if (gatewaySender.getEventQueueSize() > jsonObj.getInt(GATEWAY_MAX_QUEUE_SIZE)) {
 						// if serial gateway is connected and maximum queue size exceeds threshold send
 						// alert
-						buildSpecialLogMessage(
-								"Cluster: " + jsonObj.getString(CLUSTER_NAME) + " Queue size greater than limit of "
-										+ jsonObj.getInt(GATEWAY_MAX_QUEUE_SIZE),
-										MAJOR, gatewaySender.getMember());
+						buildSpecialLogMessage("Cluster: " + jsonObj.getString(CLUSTER_NAME)
+								+ " Queue size greater than limit of " + jsonObj.getInt(GATEWAY_MAX_QUEUE_SIZE), MAJOR,
+								gatewaySender.getMember());
 						LOG.warn("Cluster: " + jsonObj.getString(CLUSTER_NAME) + " Queue size greater than limit of "
 								+ jsonObj.getInt(GATEWAY_MAX_QUEUE_SIZE) + " Member: " + gatewaySender.getMember());
 					}
@@ -513,12 +514,12 @@ public class HealthCheck {
 	private ClientCache createConnection(Member member) {
 		if (member.getType().equals(MemberType.LOCATOR)) {
 			return new ClientCacheFactory().addPoolLocator(member.getHost(), member.getPort())
-					.set(NAME, member.getName()).setPdxReadSerialized(true).set("log-level", "CONFIG")
-					.set("log-file", "logs/health-client.log").create();
+					.set(NAME, member.getName()).setPdxReadSerialized(true).set(LOG_LEVEL, CONFIG)
+					.set(LOG_FILE, "logs/health-client.log").create();
 		} else {
 			return new ClientCacheFactory().addPoolServer(member.getHost(), member.getPort())
-					.set(NAME, member.getName()).setPdxReadSerialized(true).set("log-level", "CONFIG")
-					.set("log-file", "logs/health-client.log").create();
+					.set(NAME, member.getName()).setPdxReadSerialized(true).set(LOG_LEVEL, CONFIG)
+					.set(LOG_FILE, "logs/health-client.log").create();
 		}
 	}
 
@@ -582,10 +583,8 @@ public class HealthCheck {
 			currentGCTimeMillis = (long) cds.get(name);
 			maximumGCTimeMillis = jObj.getLong(jsonName);
 			if (currentGCTimeMillis > maximumGCTimeMillis) {
-				buildSpecialLogMessage(
-						"Cluster: " + jObj.getString(CLUSTER_NAME) + "Member " + member.getName()
-								+ " current GC time exceeds limit of " + maximumGCTimeMillis,
-								MAJOR, member.getName());
+				buildSpecialLogMessage("Cluster: " + jObj.getString(CLUSTER_NAME) + "Member " + member.getName()
+						+ " current GC time exceeds limit of " + maximumGCTimeMillis, MAJOR, member.getName());
 				LOG.error("Cluster: " + jObj.getString(CLUSTER_NAME) + "Member " + member.getName()
 						+ " current GC time exceeds limit of " + maximumGCTimeMillis + " Member: " + member.getName());
 			}
@@ -912,7 +911,7 @@ public class HealthCheck {
 		return content;
 
 		// String password = null;
-		// LOG.info("Getting Credhub Credentials");
+		// LOG.info("Getting CMDB health");
 		// CloseableHttpClient httpclient = null;
 		// try {
 		// if (this.cmdbUrl.startsWith("https")) {
@@ -922,15 +921,13 @@ public class HealthCheck {
 		// }
 		//
 		// URIBuilder builder = new URIBuilder(this.cmdbUrl);
-		// builder.setParameter("name", user);
 		// HttpGet httpGet = new HttpGet(builder.build());
 		// httpGet.addHeader("content-type", "application/json");
-		// httpGet.addHeader("authorization", "bearer " + token);
 		// HttpResponse response = null;
 		// try {
 		// response = httpclient.execute(httpGet);
 		// int code = response.getStatusLine().getStatusCode();
-		// LOG.info("HTTP credhub response code: " + code);
+		// LOG.info("HTTP CMDB response code: " + code);
 		// if (code == 200) {
 		// HttpEntity entity = response.getEntity();
 		// if (entity != null) {
