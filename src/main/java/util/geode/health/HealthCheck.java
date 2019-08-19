@@ -66,6 +66,37 @@ public class HealthCheck {
 	private static final String ALERT_CLUSTER_FQDN = "alert-cluster-fqdn";
 	private static final String HEALTH_PROPS = "health.properties";
 	private static final String ALERT_PROPS = "alert.properties";
+	private static final String SERVER_COUNT= "serverCount";
+	private static final String GC_TIME_MILLIS = "gcTimeMillis";
+	private static final String MAX_GC_TIME_MILLIS = "maximumGCTimeMillis";
+	private static final String MAX_HEAP_USAGE_PERCENT = "maximumHeapUsagePercent";
+	private static final String GATEWAY_SENDER = "gatewaySender";
+	private static final String EVENT_QUEUE_SIZE = "EventQueueSize";
+	private static final String CONNECTED = "Connected";
+	private static final String MEMBER = "member";
+	private static final String CLUSTER_NAME = "clusterName";
+	private static final String GATEWAY_MAX_QUEUE_SIZE = "gatewayMaximumQueueSize";
+	private static final String MAJOR = "MAJOR";
+	private static final String MINOR = "MINOR";
+	private static final String APPL_LOG = "applicationLog";
+	private static final String LOG4J_PROPS = "log4j.properties";
+	private static final String NAME= "name";
+	private static final String HOST = "host";
+	private static final String PORT = "port";
+	private static final String SHOW_JVM_METRICS = "showJVMMetrics";
+	private static final String MEMBER_COUNT ="MemberCount";
+	private static final String LOCATOR_COUNT = "LocatorCount";
+	private static final String TOT_HEAP_SPACE = "TotalHeapSize";
+	private static final String USED_HEAP_SPACE = "UsedHeapSize";
+	private static final String TLS = "TLS";
+	private static final String SEVERITY = "severity";
+	private static final String FQDN = "fqdn";
+	private static final String MESSAGE="message";
+	private static final String CMDB_HEALTH_JSON = "cmdb-health.json";
+	private static final String LOCATORS = "locators";
+	private static final String SERVERS = "servers";
+	private static final String PARALLEL = "Parallel";
+	private static final String PRIMARY = "Primary";
 
 	private Util util = new Util();
 
@@ -111,7 +142,7 @@ public class HealthCheck {
 			closeConnections();
 		}
 	}
-
+	
 	/**
 	 * Perform the health check using GemFire cluster and CMDB
 	 * 
@@ -123,10 +154,10 @@ public class HealthCheck {
 		// get CMDB health
 		JSONObject jsonObj = new JSONObject(getCmdbHealth());
 		// get all locators
-		List<Member> locators = getMembers(Arrays.asList(health.getLocators()), jsonObj, "locators",
+		List<Member> locators = getMembers(Arrays.asList(health.getLocators()), jsonObj, LOCATORS,
 				MemberType.LOCATOR);
 		// check locator count to CMDB
-		if (!checkMemberCount(health.getLocatorCnt(), jsonObj, "locatorCount")) {
+		if (!checkMemberCount(health.getLocatorCnt(), jsonObj, LOCATOR_COUNT)) {
 			// If missing locator(s) send alert
 			sendMissingMemberAlert(locators, jsonObj);
 		}
@@ -136,9 +167,9 @@ public class HealthCheck {
 		sendUnresponsiveMemberAlert(unresponsiveMembers, jsonObj);
 
 		// get all cache servers
-		List<Member> servers = getMembers(Arrays.asList(health.getServers()), jsonObj, "servers", MemberType.SERVER);
+		List<Member> servers = getMembers(Arrays.asList(health.getServers()), jsonObj, SERVERS, MemberType.SERVER);
 		// check cache server count to CMDB
-		if (!checkMemberCount(health.getServerCnt(), jsonObj, "serverCount")) {
+		if (!checkMemberCount(health.getServerCnt(), jsonObj, SERVER_COUNT)) {
 			// If missing cache server(s) send alert
 			sendMissingMemberAlert(servers, jsonObj);
 		}
@@ -150,17 +181,17 @@ public class HealthCheck {
 		// for each cache server get GC Time
 		for (Member member : servers) {
 			// get GC time and verify against threshold
-			getJVMGCTime(member, "gcTimeMillis", jsonObj, "maximumGCTimeMillis");
+			getJVMGCTime(member, GC_TIME_MILLIS, jsonObj, MAX_GC_TIME_MILLIS);
 		}
 
 		// check to see if cluster used heap greater than threshold
-		double usagePercent = jsonObj.getDouble("maximumHeapUsagePercent");
+		double usagePercent = jsonObj.getDouble(MAX_HEAP_USAGE_PERCENT);
 		if (health.getUsedHeap() > (health.getTotalHeap() * usagePercent)) {
 			// used heap over threshold send alert
 			buildSpecialLogMessage(
 					"Cluster's maximum heap for all cache servers exceeded. Total used heap=" + health.getUsedHeap(),
-					"MAJOR", jsonObj.getString("clusterName"));
-			LOG.error("Cluster: " + jsonObj.getString("clusterName")
+					MAJOR, jsonObj.getString(CLUSTER_NAME));
+			LOG.error("Cluster: " + jsonObj.getString(CLUSTER_NAME)
 					+ " maximum heap for all cache servers exceeded. Total used heap=" + health.getUsedHeap());
 		}
 
@@ -172,17 +203,17 @@ public class HealthCheck {
 		health.setGateway(true);
 		List<String> gatewaySenders = new ArrayList<String>();
 		for (ObjectName name : objects) {
-			String prop = name.getKeyProperty("gatewaySender");
+			String prop = name.getKeyProperty(GATEWAY_SENDER);
 			// add to list all gateway senders with different sender ids
 			if (!gatewaySenders.contains(prop))
-				gatewaySenders.add(name.getKeyProperty("gatewaySender"));
+				gatewaySenders.add(name.getKeyProperty(GATEWAY_SENDER));
 		}
 
 		// for each gateway sender see if connected and queue size is not over threshold
 		for (String sender : gatewaySenders) {
 			List<ObjectName> objectsByName = getGatewayObjectsByName(objects, sender);
 			for (ObjectName object : objectsByName) {
-				AttributeList attrs = util.getAttributes(mbs, object, new String[] { "EventQueueSize", "Connected" });
+				AttributeList attrs = util.getAttributes(mbs, object, new String[] { EVENT_QUEUE_SIZE, CONNECTED });
 				if (attrs == null || attrs.size() == 0)
 					break;
 				Attribute attr = (Attribute) attrs.get(0);
@@ -193,19 +224,19 @@ public class HealthCheck {
 				if (checkForParallelGateway(object)) {
 					// if parallel create sender and add to list
 					health.addGatewaySender(
-							new GatewaySender(object.getKeyProperty("gatewaySender"), object.getKeyProperty("member"),
+							new GatewaySender(object.getKeyProperty(GATEWAY_SENDER), object.getKeyProperty(MEMBER),
 									object, GatewayType.PARALLEL, false, eventQueueSize, connected));
 				} else {
 					// if gateway sender is a serial gateway
 					if (getPrimarySerialGateway(object)) {
 						// get the primary serial gateway create sender and add to list
-						health.addGatewaySender(new GatewaySender(object.getKeyProperty("gatewaySender"),
-								object.getKeyProperty("member"), object, GatewayType.SERIAL, true, eventQueueSize,
+						health.addGatewaySender(new GatewaySender(object.getKeyProperty(GATEWAY_SENDER),
+								object.getKeyProperty(MEMBER), object, GatewayType.SERIAL, true, eventQueueSize,
 								connected));
 					} else {
 						// add secondary gateway to list
-						health.addGatewaySender(new GatewaySender(object.getKeyProperty("gatewaySender"),
-								object.getKeyProperty("member"), object, GatewayType.SERIAL, false, eventQueueSize,
+						health.addGatewaySender(new GatewaySender(object.getKeyProperty(GATEWAY_SENDER),
+								object.getKeyProperty(MEMBER), object, GatewayType.SERIAL, false, eventQueueSize,
 								connected));
 					}
 				}
@@ -219,17 +250,17 @@ public class HealthCheck {
 				if (!gatewaySender.isConnected()) {
 					// if gateway not connected to remote side send event
 					buildSpecialLogMessage(
-							"Cluster: " + jsonObj.getString("clusterName") + " Sender not connected to remote system",
-							"MAJOR", gatewaySender.getMember());
-					LOG.warn("Cluster: " + jsonObj.getString("clusterName")
+							"Cluster: " + jsonObj.getString(CLUSTER_NAME) + " Sender not connected to remote system",
+							MAJOR, gatewaySender.getMember());
+					LOG.warn("Cluster: " + jsonObj.getString(CLUSTER_NAME)
 							+ " Sender not connected to remote system. Member=" + gatewaySender.getMember());
-				} else if (gatewaySender.getEventQueueSize() > jsonObj.getInt("gatewayMaximumQueueSize")) {
+				} else if (gatewaySender.getEventQueueSize() > jsonObj.getInt(GATEWAY_MAX_QUEUE_SIZE)) {
 					// if gateway is connected and maximum queue size exceeds threashold send alert
-					buildSpecialLogMessage("Cluster: " + jsonObj.getString("clusterName")
-							+ " Queue size greater than limit of " + jsonObj.getInt("gatewayMaximumQueueSize"), "MAJOR",
+					buildSpecialLogMessage("Cluster: " + jsonObj.getString(CLUSTER_NAME)
+							+ " Queue size greater than limit of " + jsonObj.getInt(GATEWAY_MAX_QUEUE_SIZE), MAJOR,
 							gatewaySender.getMember());
-					LOG.warn("Cluster: " + jsonObj.getString("clusterName") + " Queue size greater than limit of "
-							+ jsonObj.getInt("gatewayMaximumQueueSize") + " Member: " + gatewaySender.getMember());
+					LOG.warn("Cluster: " + jsonObj.getString(CLUSTER_NAME) + " Queue size greater than limit of "
+							+ jsonObj.getInt(GATEWAY_MAX_QUEUE_SIZE) + " Member: " + gatewaySender.getMember());
 				}
 			} else {
 				// if a serial gateway
@@ -237,19 +268,19 @@ public class HealthCheck {
 					// if gateway is the primary serial gateway
 					if (!gatewaySender.isConnected()) {
 						// if gateway is not connected to remote side send alert
-						buildSpecialLogMessage("Cluster: " + jsonObj.getString("clusterName")
-								+ " Sender not connected to remote system", "MAJOR", gatewaySender.getMember());
-						LOG.warn("Cluster: " + jsonObj.getString("clusterName")
+						buildSpecialLogMessage("Cluster: " + jsonObj.getString(CLUSTER_NAME)
+								+ " Sender not connected to remote system", MAJOR, gatewaySender.getMember());
+						LOG.warn("Cluster: " + jsonObj.getString(CLUSTER_NAME)
 								+ " Sender not connected to remote system. Member: " + gatewaySender.getMember());
-					} else if (gatewaySender.getEventQueueSize() > jsonObj.getInt("gatewayMaximumQueueSize")) {
+					} else if (gatewaySender.getEventQueueSize() > jsonObj.getInt(GATEWAY_MAX_QUEUE_SIZE)) {
 						// if serial gateway is connected and maximum queue size exceeds threshold send
 						// alert
 						buildSpecialLogMessage(
-								"Cluster: " + jsonObj.getString("clusterName") + " Queue size greater than limit of "
-										+ jsonObj.getInt("gatewayMaximumQueueSize"),
-								"MAJOR", gatewaySender.getMember());
-						LOG.warn("Cluster: " + jsonObj.getString("clusterName") + " Queue size greater than limit of "
-								+ jsonObj.getInt("gatewayMaximumQueueSize") + " Member: " + gatewaySender.getMember());
+								"Cluster: " + jsonObj.getString(CLUSTER_NAME) + " Queue size greater than limit of "
+										+ jsonObj.getInt(GATEWAY_MAX_QUEUE_SIZE),
+										MAJOR, gatewaySender.getMember());
+						LOG.warn("Cluster: " + jsonObj.getString(CLUSTER_NAME) + " Queue size greater than limit of "
+								+ jsonObj.getInt(GATEWAY_MAX_QUEUE_SIZE) + " Member: " + gatewaySender.getMember());
 					}
 				}
 			}
@@ -261,9 +292,9 @@ public class HealthCheck {
 	 */
 	private void createLogAppender() {
 		ClassLoader loader = Thread.currentThread().getContextClassLoader();
-		URL url = loader.getResource("log4j.properties");
+		URL url = loader.getResource(LOG4J_PROPS);
 		PropertyConfigurator.configure(url);
-		LOG = Logger.getLogger("applicationLog");
+		LOG = Logger.getLogger(APPL_LOG);
 	}
 
 	/**
@@ -298,7 +329,7 @@ public class HealthCheck {
 		List<ObjectName> objectsByName = new ArrayList<ObjectName>();
 		if (objects != null && objects.length > 0) {
 			for (ObjectName object : objects) {
-				if (object.getKeyProperty("gatewaySender").equals(name)) {
+				if (object.getKeyProperty(GATEWAY_SENDER).equals(name)) {
 					objectsByName.add(object);
 				}
 			}
@@ -317,10 +348,10 @@ public class HealthCheck {
 		if (name == null) {
 			return false;
 		}
-		AttributeList attrs = util.getAttributes(mbs, name, new String[] { "Parallel" });
+		AttributeList attrs = util.getAttributes(mbs, name, new String[] { PARALLEL });
 		if (attrs != null && attrs.size() == 1) {
 			Attribute attr = (Attribute) attrs.get(0);
-			if ("Parallel".equalsIgnoreCase(attr.getName())) {
+			if (PARALLEL.equalsIgnoreCase(attr.getName())) {
 				return (boolean) attr.getValue();
 			}
 		}
@@ -340,10 +371,10 @@ public class HealthCheck {
 		}
 
 		boolean primary = false;
-		AttributeList attrs = util.getAttributes(mbs, name, new String[] { "Primary" });
+		AttributeList attrs = util.getAttributes(mbs, name, new String[] { PRIMARY });
 		if (attrs != null && attrs.size() == 1) {
 			Attribute attr = (Attribute) attrs.get(0);
-			if ("Primary".equalsIgnoreCase(attr.getName())) {
+			if (PRIMARY.equalsIgnoreCase(attr.getName())) {
 				primary = (boolean) attr.getValue();
 				if (primary)
 					return primary;
@@ -360,9 +391,9 @@ public class HealthCheck {
 	private void sendMissingMemberAlert(List<Member> members, JSONObject jsonObj) {
 		for (Member member : members) {
 			if (member.isMissing()) {
-				buildSpecialLogMessage("Cluster: " + jsonObj.getString("clusterName") + jsonObj.getString("clusterName")
-						+ " Member " + member.getName() + " is down", "MAJOR", member.getName());
-				LOG.error("Cluster: " + jsonObj.getString("clusterName") + " Member " + member.getName()
+				buildSpecialLogMessage("Cluster: " + jsonObj.getString(CLUSTER_NAME) + jsonObj.getString(CLUSTER_NAME)
+						+ " Member " + member.getName() + " is down", MAJOR, member.getName());
+				LOG.error("Cluster: " + jsonObj.getString(CLUSTER_NAME) + " Member " + member.getName()
 						+ " is down Member: " + member.getName());
 			}
 		}
@@ -376,9 +407,9 @@ public class HealthCheck {
 	private void sendUnresponsiveMemberAlert(List<Member> members, JSONObject jsonObj) {
 		for (Member member : members) {
 			buildSpecialLogMessage(
-					"Cluster: " + jsonObj.getString("clusterName") + " Member " + member.getName() + " is unresponsive",
-					"MAJOR", member.getName());
-			LOG.error("Cluster: " + jsonObj.getString("clusterName") + " Member " + member.getName()
+					"Cluster: " + jsonObj.getString(CLUSTER_NAME) + " Member " + member.getName() + " is unresponsive",
+					MAJOR, member.getName());
+			LOG.error("Cluster: " + jsonObj.getString(CLUSTER_NAME) + " Member " + member.getName()
 					+ " is unresponsive Member: " + member.getName());
 		}
 	}
@@ -447,10 +478,10 @@ public class HealthCheck {
 					for (int j = 0; j < keysToCheck.length; j++) {
 						Object value = region.get(keysToCheck[j]);
 						if (value == null) {
-							buildSpecialLogMessage("Cluster: " + json.getString("clusterName") + " Member "
+							buildSpecialLogMessage("Cluster: " + json.getString(CLUSTER_NAME) + " Member "
 									+ member.getName() + " region " + region.getName()
-									+ " region object missing for key = " + keysToCheck[j], "MAJOR", member.getName());
-							LOG.error("Cluster: " + json.getString("clusterName") + " Member " + member.getName()
+									+ " region object missing for key = " + keysToCheck[j], MAJOR, member.getName());
+							LOG.error("Cluster: " + json.getString(CLUSTER_NAME) + " Member " + member.getName()
 									+ " region " + region.getName() + " region object missing for key = "
 									+ keysToCheck[j] + " Member: " + member.getName());
 						}
@@ -482,11 +513,11 @@ public class HealthCheck {
 	private ClientCache createConnection(Member member) {
 		if (member.getType().equals(MemberType.LOCATOR)) {
 			return new ClientCacheFactory().addPoolLocator(member.getHost(), member.getPort())
-					.set("name", member.getName()).setPdxReadSerialized(true).set("log-level", "CONFIG")
+					.set(NAME, member.getName()).setPdxReadSerialized(true).set("log-level", "CONFIG")
 					.set("log-file", "logs/health-client.log").create();
 		} else {
 			return new ClientCacheFactory().addPoolServer(member.getHost(), member.getPort())
-					.set("name", member.getName()).setPdxReadSerialized(true).set("log-level", "CONFIG")
+					.set(NAME, member.getName()).setPdxReadSerialized(true).set("log-level", "CONFIG")
 					.set("log-file", "logs/health-client.log").create();
 		}
 	}
@@ -505,9 +536,9 @@ public class HealthCheck {
 		JSONArray jarray = jsonObj.getJSONArray(key);
 		for (int i = 0; i < jarray.length(); i++) {
 			JSONObject jObj = (JSONObject) jarray.get(i);
-			String name = jObj.getString("name");
-			String host = jObj.getString("host");
-			int port = jObj.getInt("port");
+			String name = jObj.getString(NAME);
+			String host = jObj.getString(HOST);
+			int port = jObj.getInt(PORT);
 			if (!members.contains(name)) {
 				memberList.add(new Member(name, host, port, true, type));
 			} else {
@@ -546,16 +577,16 @@ public class HealthCheck {
 		long currentGCTimeMillis = 0;
 		long maximumGCTimeMillis = 0;
 		if (!member.isMissing()) {
-			cds = (CompositeDataSupport) mbs.invoke(systemName, "showJVMMetrics", new Object[] { member.getName() },
+			cds = (CompositeDataSupport) mbs.invoke(systemName, SHOW_JVM_METRICS, new Object[] { member.getName() },
 					new String[] { String.class.getName() });
 			currentGCTimeMillis = (long) cds.get(name);
 			maximumGCTimeMillis = jObj.getLong(jsonName);
 			if (currentGCTimeMillis > maximumGCTimeMillis) {
 				buildSpecialLogMessage(
-						"Cluster: " + jObj.getString("clusterName") + "Member " + member.getName()
+						"Cluster: " + jObj.getString(CLUSTER_NAME) + "Member " + member.getName()
 								+ " current GC time exceeds limit of " + maximumGCTimeMillis,
-						"MAJOR", member.getName());
-				LOG.error("Cluster: " + jObj.getString("clusterName") + "Member " + member.getName()
+								MAJOR, member.getName());
+				LOG.error("Cluster: " + jObj.getString(CLUSTER_NAME) + "Member " + member.getName()
 						+ " current GC time exceeds limit of " + maximumGCTimeMillis + " Member: " + member.getName());
 			}
 		}
@@ -570,11 +601,11 @@ public class HealthCheck {
 	private Health getHealthDetails() throws Exception {
 		LOG.info("Retrieving GemFire health details");
 		Health health = new Health();
-		AttributeList al = getHealthAttributes(new String[] { "MemberCount", "LocatorCount" }, systemName);
+		AttributeList al = getHealthAttributes(new String[] { MEMBER_COUNT, LOCATOR_COUNT }, systemName);
 		health.setLocatorCnt(Integer.parseInt(String.valueOf(((Attribute) al.get(1)).getValue())));
 		health.setServerCnt(
 				Integer.parseInt(String.valueOf(((Attribute) al.get(0)).getValue())) - health.getLocatorCnt());
-		al = getHealthAttributes(new String[] { "TotalHeapSize", "UsedHeapSize" }, systemName);
+		al = getHealthAttributes(new String[] { TOT_HEAP_SPACE, USED_HEAP_SPACE }, systemName);
 		health.setTotalHeap(Double.valueOf(String.valueOf(((Attribute) al.get(0)).getValue())));
 		health.setUsedHeap(Double.valueOf(String.valueOf(((Attribute) al.get(1)).getValue())));
 		String[] senders = getNames(Constants.ListType.SENDERS);
@@ -782,7 +813,7 @@ public class HealthCheck {
 	 * @throws Exception
 	 */
 	private SSLConnectionSocketFactory setupSSL() throws Exception {
-		SSLContext ssl_ctx = SSLContext.getInstance("TLS");
+		SSLContext ssl_ctx = SSLContext.getInstance(TLS);
 		TrustManager[] trust_mgr = get_trust_mgr();
 		ssl_ctx.init(null, trust_mgr, new SecureRandom());
 		HostnameVerifier allowAllHosts = new NoopHostnameVerifier();
@@ -810,11 +841,11 @@ public class HealthCheck {
 
 		String severity = logMessage.getHeader().getSeverity();
 		if (logMessage.getHeader().getSeverity().equals(Constants.WARNING)) {
-			severity = "MINOR";
+			severity = MINOR;
 		}
 
-		String json = new JSONObject().put("fqdn", alertClusterFqdn).put("severity", severity)
-				.put("message", logMessage.getHeader().toString() + " " + logMessage.getBody()).toString();
+		String json = new JSONObject().put(FQDN, alertClusterFqdn).put(SEVERITY, severity)
+				.put(MESSAGE, logMessage.getHeader().toString() + " " + logMessage.getBody()).toString();
 		LOG.info("Sending Alert Message json payload=" + json);
 
 		try {
@@ -874,7 +905,7 @@ public class HealthCheck {
 	private String getCmdbHealth() {
 		String content = "";
 		try {
-			content = new String(Files.readAllBytes(Paths.get("cmdb-health.json")));
+			content = new String(Files.readAllBytes(Paths.get(CMDB_HEALTH_JSON)));
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
