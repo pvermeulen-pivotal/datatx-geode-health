@@ -55,31 +55,31 @@ The CMDB service provides the CMDB details for a cluster name and the informatio
 **Example CMDB JSON Response**
 
    {   
-	   "clusterName": "cluster-1",   
-	   "locatorCount": 1,   
-	   "serverCount": 2,   
-	   "maximumHeapUsagePercent": 0.95,   
-	   "maximumGCTimeMillis": 1000,   
-	   "gateway": "true",   
-	   "gatewayMaximumQueueSize": 500,   
-	   "locators": [   
-		   {   
-			   "name": "locator1",   
-			   "host": "192.168.1.5",   
-			   "port": 10334   
-		   }   
-       ],   
-	   "servers": [   
-		   {   
-			   "name": "server1",   
-			   "host": "192.168.1.5",   
-			   "port": 40404   
-		   },   
-	 	   {   
-			   "name": "server2",   
-			   "host": "192.168.1.5",   
-			   "port": 40405   
-		   }   
-	   ]   
+	      "clusterName": "cluster-1",   
+	      "locatorCount": 1,   
+	      "serverCount": 2,   
+	      "maximumHeapUsagePercent": 0.95,   
+	      "maximumGCTimeMillis": 1000,   
+	      "gateway": "true",   
+	      "gatewayMaximumQueueSize": 500,   
+	      "locators": [   
+                      {   
+		           "name": "locator1",   
+                           "host": "192.168.1.5",   
+                           "port": 10334   
+                      }
+              ],   
+              "servers": [   
+                     {   
+                          "name": "server1",   
+                          "host": "192.168.1.5",   
+                          "port": 40404   
+                     },   
+                     {   
+                          "name": "server2",   
+                          "host": "192.168.1.5",   
+                          "port": 40405   
+                     }   
+              ]   
    }   
 	 
