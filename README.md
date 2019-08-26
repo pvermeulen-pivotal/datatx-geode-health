@@ -50,7 +50,7 @@ The following steps are performed by the health check application:
 
 ### CMDB Health ###
 
-The CMDB service provides the CMDB details for a cluster name and the information is requested using the cluster name/id.
+The CMDB service provides the configuration details for a cluster name. The service uses the cluster name to retrieve CMDB information.
 
 **Example CMDB JSON Response**
 
