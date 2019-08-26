@@ -1,11 +1,11 @@
-#Datatx Geode Health Check# 
+# Datatx Geode Health Check # 
 
-##Overview##
+## Overview ##
 
 The health check is an application that performs validation of a GemFire cluster to ensure all locators, cache servers and 
 gateways are running and operational. In the event, of component failure an alert will be generated for the failing component.
 
-###Steps Performed###
+### Steps Performed ###
 
 The following steps are performed by the health check application:   
 
@@ -48,7 +48,7 @@ The following steps are performed by the health check application:
 |----|-----------|
 |log4j.appender.applicationLog.File|The health check application log file name and location|
 
-###CMDB Health###
+### CMDB Health ###
 
 The CMDB service provides the CMDB details for a cluster name and the information is requested using the cluster name/id.
 
