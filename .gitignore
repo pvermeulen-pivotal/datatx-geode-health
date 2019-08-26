@@ -6,3 +6,4 @@ target/
 src/.DS_Store
 src/main/.DS_Store
 .factorypath
+logs/

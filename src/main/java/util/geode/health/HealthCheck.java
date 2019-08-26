@@ -31,6 +31,7 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 
+import org.apache.commons.lang.StringUtils;
 import org.apache.geode.cache.Region;
 import org.apache.geode.cache.client.ClientCache;
 import org.apache.geode.cache.client.ClientCacheFactory;
@@ -73,6 +74,8 @@ public class HealthCheck {
 	private static final String GATEWAY_SENDER = "gatewaySender";
 	private static final String EVENT_QUEUE_SIZE = "EventQueueSize";
 	private static final String CONNECTED = "Connected";
+	private static final String RUNNING = "Running";
+	private static final String NUMBER_GATEWAYS = "NumGateways";
 	private static final String MEMBER = "member";
 	private static final String CLUSTER_NAME = "clusterName";
 	private static final String GATEWAY_MAX_QUEUE_SIZE = "gatewayMaximumQueueSize";
@@ -100,6 +103,8 @@ public class HealthCheck {
 	private static final String LOG_LEVEL = "log-level";
 	private static final String LOG_FILE = "log-file";
 	private static final String CONFIG = "CONFIG";
+	private static final String CMDB_URL = "cmdb-url";
+	private static final String HEALTH_CHK_INT = "health-check-interval";
 
 	private Util util = new Util();
 
@@ -119,17 +124,22 @@ public class HealthCheck {
 	private String alertUrl;
 	private String alertClusterFqdn;
 	private String cmdbUrl;
+	private long healthCheckInterval;
 
 	public enum MemberType {
 		LOCATOR, SERVER
 	};
 
+	public long getHealthCheckInterval() {
+		return this.healthCheckInterval;
+	}
+
 	/**
-	 * start the health check for GemFire cluster
+	 * initialize and load properties
 	 * 
 	 * @throws Exception
 	 */
-	public void start() throws Exception {
+	public void initialize() throws Exception {
 		// create log4j log file appender
 		createLogAppender();
 		LOG.info("Started health check at " + new Date());
@@ -137,6 +147,14 @@ public class HealthCheck {
 		loadHealthProps();
 		// load alert properties from file
 		getSendAlertPropertyFile();
+	}
+
+	/**
+	 * start the health check for GemFire cluster
+	 * 
+	 * @throws Exception
+	 */
+	public void start() throws Exception {
 		// connect to locator JMX
 		if (connect()) {
 			// if sucessfully connected to JMX perform health check pn cluster
@@ -283,6 +301,36 @@ public class HealthCheck {
 						LOG.warn("Cluster: " + jsonObj.getString(CLUSTER_NAME) + " Queue size greater than limit of "
 								+ jsonObj.getInt(GATEWAY_MAX_QUEUE_SIZE) + " Member: " + gatewaySender.getMember());
 					}
+				}
+			}
+		}
+
+		objects = util.getObjectNames(mbs, systemName, Constants.ObjectNameType.GATEWAY_RECEIVERS);
+		if (objects == null || objects.length == 0)
+			return;
+
+		for (ObjectName object : objects) {
+			AttributeList attrs = util.getAttributes(mbs, object, new String[] { RUNNING, NUMBER_GATEWAYS });
+			if (attrs == null || attrs.size() == 0)
+				break;
+			Attribute attr = (Attribute) attrs.get(0);
+			boolean running = (boolean) attr.getValue();
+			attr = (Attribute) attrs.get(1);
+			int numberGateways = (int) attr.getValue();
+			if (!running) {
+				buildSpecialLogMessage("Cluster: " + jsonObj.getString(CLUSTER_NAME)
+						+ " The Gateway Receiver is not active and running", MAJOR, "Gateway Receiver");
+				LOG.warn("Cluster: " + jsonObj.getString(CLUSTER_NAME)
+						+ " The Gateway Receiver is not active and running" + " Member: Gateway Receiver");
+			} else {
+				if (numberGateways == 0) {
+					buildSpecialLogMessage(
+							"Cluster: " + jsonObj.getString(CLUSTER_NAME)
+									+ " There are no remote gateway senders connected to local Gateway Receiver",
+							MAJOR, "Gateway Receiver");
+					LOG.warn("Cluster: " + jsonObj.getString(CLUSTER_NAME)
+							+ " There are no remote gateway senders connected to local Gateway Receiver"
+							+ " Member: Gateway Receiver");
 				}
 			}
 		}
@@ -737,6 +785,25 @@ public class HealthCheck {
 				jmxPort = value;
 			}
 
+			this.cmdbUrl = healthProps.getProperty(CMDB_URL);
+			if (this.cmdbUrl == null || this.cmdbUrl.length() == 0) {
+				throw new RuntimeException(
+						"the cmdb-url in the health.properties file is not defined or is invalid + cmdb-url="
+								+ this.cmdbUrl);
+			}
+			if (!this.cmdbUrl.endsWith("/")) {
+				this.cmdbUrl = this.cmdbUrl + "/";
+			}
+
+			if (StringUtils.isNumeric(healthProps.getProperty(HEALTH_CHK_INT))) {
+				long lValue = Long.parseLong(healthProps.getProperty(HEALTH_CHK_INT));
+				this.healthCheckInterval = (lValue * 60) * 1000;
+			} else {
+				LOG.warn("The " + HEALTH_CHK_INT
+						+ " is not defined in the health.properties defaulting inteval will be 10 mins");
+				this.healthCheckInterval = (10 * 60) * 1000;
+			}
+
 		} catch (IOException e) {
 			throw new RuntimeException(Constants.E_PROC_PROPS + e.getMessage());
 		}
@@ -902,87 +969,76 @@ public class HealthCheck {
 	 * @return
 	 */
 	private String getCmdbHealth() {
-		String content = "";
-		try {
-			content = new String(Files.readAllBytes(Paths.get(CMDB_HEALTH_JSON)));
-		} catch (IOException e) {
-			e.printStackTrace();
+		CloseableHttpClient httpclient = null;
+		String cmdbResponse = null;
+
+		LOG.info("Getting CMDB health");
+		if (this.cmdbUrl.toUpperCase().equals("useFile")) {
+			try {
+				cmdbResponse = new String(Files.readAllBytes(Paths.get(CMDB_HEALTH_JSON)));
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		} else {
+			try {
+				if (this.cmdbUrl.startsWith("https")) {
+					httpclient = HttpClients.custom().setSSLSocketFactory(setupSSL()).build();
+				} else {
+					httpclient = HttpClients.createDefault();
+				}
+
+				URIBuilder builder = new URIBuilder(this.cmdbUrl + this.alertClusterFqdn);
+				HttpGet httpGet = new HttpGet(builder.build());
+				httpGet.addHeader("content-type", "application/json");
+				HttpResponse response = null;
+				try {
+					response = httpclient.execute(httpGet);
+					int code = response.getStatusLine().getStatusCode();
+					LOG.info("HTTP CMDB response code: " + code);
+					if (code == 200) {
+						HttpEntity entity = response.getEntity();
+						if (entity != null) {
+							try {
+								InputStream instream = entity.getContent();
+								byte[] responseData = new byte[5000];
+								int bytesRead = instream.read(responseData);
+								if (bytesRead > 0) {
+									cmdbResponse = new String(responseData).trim();
+									if (!cmdbResponse.startsWith("{"))
+										cmdbResponse = "{" + cmdbResponse;
+									if (!cmdbResponse.endsWith("}"))
+										cmdbResponse = cmdbResponse + "}";
+									LOG.info("CMDB HTTP Get Response: " + cmdbResponse);
+								} else {
+									LOG.info("CMDB HTTP no response to Get received");
+								}
+								instream.close();
+							} catch (Exception e) {
+								LOG.error("Error reading HTTP CMDB Get response exception: " + e.getMessage());
+							}
+						} else {
+							LOG.warn("HTTP CMDB Get response entity was null");
+						}
+					} else {
+						LOG.error("Invalid response code received from HTTP CMDB Get code = " + code);
+					}
+				} catch (Exception e) {
+					LOG.error("Error executing HTTP CMDB Get exception: " + e.getMessage());
+				}
+			} catch (Exception e) {
+				LOG.error("Error adding CMDB header/entity exception: " + e.getMessage());
+			}
+
+			if (httpclient != null) {
+				try {
+					httpclient.close();
+				} catch (IOException e) {
+					LOG.error("Error closing CMDB HTTP Client exception: " + e.getMessage());
+				}
+			}
 		}
-		return content;
 
-		// String password = null;
-		// LOG.info("Getting CMDB health");
-		// CloseableHttpClient httpclient = null;
-		// try {
-		// if (this.cmdbUrl.startsWith("https")) {
-		// httpclient = HttpClients.custom().setSSLSocketFactory(setupSSL()).build();
-		// } else {
-		// httpclient = HttpClients.createDefault();
-		// }
-		//
-		// URIBuilder builder = new URIBuilder(this.cmdbUrl);
-		// HttpGet httpGet = new HttpGet(builder.build());
-		// httpGet.addHeader("content-type", "application/json");
-		// HttpResponse response = null;
-		// try {
-		// response = httpclient.execute(httpGet);
-		// int code = response.getStatusLine().getStatusCode();
-		// LOG.info("HTTP CMDB response code: " + code);
-		// if (code == 200) {
-		// HttpEntity entity = response.getEntity();
-		// if (entity != null) {
-		// try {
-		// InputStream instream = entity.getContent();
-		// byte[] responseData = new byte[5000];
-		// int bytesRead = instream.read(responseData);
-		// if (bytesRead > 0) {
-		// String str = new String(responseData).trim();
-		// if (!str.startsWith("{"))
-		// str = "{" + str;
-		// if (!str.endsWith("}"))
-		// str = str + "}";
-		// JSONObject json = new JSONObject(str);
-		// JSONArray arr = json.getJSONArray("data");
-		// int length = json.length();
-		// for (int i = 0; i < length; i++) {
-		// JSONObject jObj = arr.getJSONObject(i);
-		// jObj = jObj.getJSONObject("value");
-		// password = (String) jObj.get("password");
-		// }
-		// LOG.info("Credhub HTTP Get Response: " + str);
-		// } else {
-		// LOG.info("Credhub HTTP no response to Get received");
-		// }
-		// instream.close();
-		// } catch (Exception e) {
-		// LOG.error("Error reading HTTP Credhub Get response exception: " +
-		// e.getMessage());
-		// }
-		// } else {
-		// LOG.warn("HTTP Credhub Get response entity was null");
-		// }
-		// } else {
-		// LOG.error("Invalid response code received from HTTP Credhub Get code = " +
-		// code);
-		// }
-		// } catch (Exception e) {
-		// LOG.error("Error executing HTTP Credhub Get exception: " + e.getMessage());
-		// }
-		// } catch (Exception e) {
-		// LOG.error("Error adding Credhub header/entity exception: " + e.getMessage());
-		// }
-		//
-		// if (httpclient != null) {
-		// try {
-		// httpclient.close();
-		// } catch (IOException e) {
-		// LOG.error("Error closing Credhub HTTP Client exception: " + e.getMessage());
-		// }
-		// }
-		//
-		// return password;
-		// }
-
+		return cmdbResponse;
 	}
 
 	/**
@@ -992,7 +1048,13 @@ public class HealthCheck {
 	 * @throws Exception
 	 */
 	public static void main(String[] args) throws Exception {
+		boolean complete = false;
 		HealthCheck healthCheck = new HealthCheck();
-		healthCheck.start();
+		healthCheck.initialize();
+		long interval = healthCheck.getHealthCheckInterval();
+		while (!complete) {
+			healthCheck.start();
+			Thread.sleep(interval);
+		}
 	}
 }
