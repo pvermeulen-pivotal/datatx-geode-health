@@ -54,7 +54,7 @@ The CMDB service provides the CMDB details for a cluster name and the informatio
 
 **Example CMDB JSON Response**
 
-   {
+   {   
 	   "clusterName": "cluster-1",   
 	   "locatorCount": 1,   
 	   "serverCount": 2,   
