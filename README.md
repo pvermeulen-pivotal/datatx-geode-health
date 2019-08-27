@@ -3,7 +3,13 @@
 ## Overview ##
 
 The health check is an application that performs validation of a GemFire cluster to ensure all locators, cache servers and 
-gateways are running and operational. In the event, of component failure an alert will be generated for the failing component.
+gateways are running and operational. In the event, of component failure an alert will be generated for the failing component.   
+
+There are two (2) ways the health check application can be implemented:    
+
+The first method is a stand-alone health check that performs a health check and sleeps for a period of time based on the property setting *health-check-interval* and repeats the health check until the application is stopped.   
+
+The second method uses the GemFire Monitor datatx-geode-monitor abstract and datatx-geode-jmx-monitor applications. Using the property settings in the monitor.properties  The in health.properties will repeat the health check after 
 
 ### Steps Performed ###
 
