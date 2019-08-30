@@ -1,5 +1,7 @@
 {
-	"clusterName": "cluster-1",
+	"cluster": "Cluster-1",
+	"site": "PasV2",
+	"environment": "Development",
 	"locatorCount": 1,
 	"serverCount": 2,
 	"maximumHeapUsagePercent": 0.95,
